@@ -1,0 +1,246 @@
+clear ; close all; clc
+
+%% =============== Part 1 : Initializing CNN Variables and Other Stuff ===================================
+
+total_num_layer = 3; %input("\nEnter the total number of layers in your CNN including input and output layers \n")
+num_training_ex = 5000; % input("\nEnter the total number of training examples ( number of images you will be using to train CNN ) \n")
+dim_input_layer_images = 20 %input("\nEnter the dimension ( ONLY SQUARE IMAGES ARE ALLOWED SO DIMENSION IS LENGTH = WIDTH OF IMAGE )\n")
+total_num_labels = 10%  input("\nEnter the number of labels/classification of the input images\n")
+sample_factor =  0% input("\nEnter the Sampling Factor you want to keep in your CNN\n")
+num_kernel_layer = total_num_layer - 1 ; % Total Number of Kernel Layers
+
+dim_subkernel_layer                = zeros(num_kernel_layer,1); % Allocating Space for dimensions of subkernels in each kernel layer
+kernel_count_in_layer              = zeros(num_kernel_layer,1); 
+num_subkernels_per_kernel_in_layer = zeros(num_kernel_layer,1);
+num_feature_maps_in_layer          = zeros(total_num_layer,1);
+dim_feature_maps_in_layer          = zeros(total_num_layer,1);
+num_bias_in_layer                  = zeros(total_num_layer-1,1);
+num_bias_per_kernel_in_layer       = zeros(num_kernel_layer,1) ;
+num_bias_in_kernel_layer           = zeros(num_kernel_layer,1);
+num_bias_per_subkernel             = 1;
+
+for i1=1:num_kernel_layer,
+printf("\nEnter the dimension of the subkernel of %dth kernel layer\n",i1);
+dim_subkernel_layer(i1,1) = input("");
+end
+
+for i2=1:num_kernel_layer,
+printf("\nEnter the number of kernels in %dth kernel layer\n",i2);      % NUMBER OF KERNELS IN FINAL LAYER = NUMBER OF LABELS
+kernel_count_in_layer(i2,1) = input("");
+end
+
+printf("\nNumber of kernels in final kernel layer must match the number of labels\n");
+
+num_feature_maps_in_layer(1,1)=1;
+
+printf("\nBy default, number of feature maps in layer 1 ( input layer ) = 1\n");
+
+dim_feature_maps_in_layer(1,1)=dim_input_layer_images;
+
+for i3=2:total_num_layer,
+num_feature_maps_in_layer(i3,1)            = kernel_count_in_layer(i3-1,1);
+if sample_factor!=0,
+dim_feature_maps_in_layer(i3,1)            = 1 + (dim_feature_maps_in_layer(i3-1,1)-dim_subkernel_layer(i3-1))/sample_factor;
+end
+if sample_factor==0,
+dim_feature_maps_in_layer(i3,1)            = 1 ;
+end
+num_subkernels_per_kernel_in_layer(i3-1,1) = num_feature_maps_in_layer(i3-1,1);
+num_bias_in_layer(i3-1,1)                  = dim_feature_maps_in_layer(i3,1)*dim_feature_maps_in_layer(i3,1);
+num_bias_per_kernel_in_layer(i3-1,1)       = num_subkernels_per_kernel_in_layer(i3-1,1);
+num_bias_in_kernel_layer(i3-1)             = kernel_count_in_layer(i3-1,1)*num_bias_per_kernel_in_layer(i3-1,1);
+end
+
+
+
+%% ====================  Part 2 : Loading And Visualising Data And Loading Weights ===============================================
+
+printf("\nLoading and Visualizing Data ...\n");
+
+load('ex4data1.mat');
+
+x_modified = zeros(dim_feature_maps_in_layer(1,1),dim_feature_maps_in_layer(1,1),num_training_ex);
+y_modified = zeros(total_num_labels,num_training_ex);
+
+for i4=1:num_training_ex,
+x_modified(:,:,i4) = reshape(X(i4,:),dim_feature_maps_in_layer(1,1),dim_feature_maps_in_layer(1,1));
+y_modified(y(i4,1),i4)=1;
+end
+
+bias    = cell(num_kernel_layer,1);
+kernel  = cell(num_kernel_layer,1);
+
+for i5=1:num_kernel_layer,
+bias{i5}   = cell(kernel_count_in_layer(i5,1),1);
+kernel{i5} = cell(kernel_count_in_layer(i5,1),1);
+for i6=1:kernel_count_in_layer(i5,1),
+kernel{i5}{i6} =cell(num_subkernels_per_kernel_in_layer(i5,1),1);
+bias{i5}{i6}   =cell(num_subkernels_per_kernel_in_layer(i5,1),1);
+for i7=1:num_subkernels_per_kernel_in_layer(i5,1),
+kernel{i5}{i6}{i7} = mod(rand(dim_subkernel_layer(i5,1),dim_subkernel_layer(i5,1)),0.12) - 0.12;
+bias{i5}{i6}{i7}   = mod(rand(dim_subkernel_layer(i5,1),dim_subkernel_layer(i5,1)),0.12) - 0.12;
+end
+end
+end
+
+grad_kernel = kernel;
+grad_bias   = bias;
+
+nbrick = cell(total_num_layer,1);
+nbrick{1} = cell(1,1);
+nbrick{1}{1} = zeros(size(x_modified(:,:,1)));
+
+for i8=2:total_num_layer,
+nbrick{i8} = cell(kernel_count_in_layer(i8-1,1),1);
+for i9=1:kernel_count_in_layer(i8-1,1),
+nbrick{i8}{i9} = zeros(dim_feature_maps_in_layer(i8,1),dim_feature_maps_in_layer(i8,1));
+end
+end
+
+delta_brick = nbrick;
+
+% Randomly select 100 data points to display
+sel = randperm(size(X, 1));
+sel = sel(1:100);
+displayData(X(sel, :));
+
+fprintf('Program paused. Press enter to continue.\n');
+pause;
+
+
+
+%% =========== Part 3 : Computing Cost With Regularization And Simultaneously Implementing Backpropagation to get Gradient =============
+
+fprintf("\nFeedforward and Backpropagating Convoltuion Neural Network ... \n")
+
+lambda = 1;
+alpha = 0.01;
+J=0;
+for s1=1:50,
+
+%[J grad_kernel grad_bias]= cnnCost(kernel, bias, nbrick, num_training_ex, dim_feature_maps_in_layer, num_kernel_layer,                    total_num_labels,num_subkernels_per_kernel_in_layer,kernel_count_in_layer, x_modified, y_modified, lambda, sample_factor, dim_subkernel_layer, %total_num_layer, num_feature_maps_in_layer);
+
+fprintf("\nCost : %f\n", J);
+
+for s2=1:num_kernel_layer, 
+for s3=1:kernel_count_in_layer(s2,1),
+for s4=1:num_subkernels_per_kernel_in_layer(s2,1),
+for s5=1:dim_subkernel_layer(s2,1),
+for s6=1:dim_subkernel_layer(s2,1),
+kernel{s2,1}{s3,1}{s4,1}(s5,s6) -= alpha*grad_kernel{s2,1}{s3,1}{s4,1}(s5,s6);
+if s5==dim_subkernel_layer&&s6==dim_subkernel_layer,
+bias{s2,1}{s3,1}{s4,1}(1,1) -= alpha*grad_bias{s2,1}{s3,1}{s4,1}(1,1);
+end
+
+end
+end
+end
+end
+end
+
+end
+
+
+fprintf('Program paused. Press enter to continue.\n');
+pause;
+
+
+
+
+%% =============== Part 7: Implement Backpropagation ===============
+%  Once your cost matches up with ours, you should proceed to implement the
+%  backpropagation algorithm for the neural network. You should add to the
+%  code you've written in nnCostFunction.m to return the partial
+%  derivatives of the parameters.
+%
+fprintf('\nChecking Backpropagation... \n');
+
+%  Check gradients by running checkNNGradients
+checkNNGradients;
+
+fprintf('\nProgram paused. Press enter to continue.\n');
+pause;
+
+
+%% =============== Part 8: Implement Regularization ===============
+%  Once your backpropagation implementation is correct, you should now
+%  continue to implement the regularization with the cost and gradient.
+%
+
+fprintf('\nChecking Backpropagation (w/ Regularization) ... \n')
+
+%  Check gradients by running checkNNGradients
+lambda = 3;
+checkNNGradients(lambda);
+
+% Also output the costFunction debugging values
+debug_J  = nnCostFunction(nn_params, input_layer_size, ...
+                          hidden_layer_size, num_labels, X, y, lambda);
+
+fprintf(['\n\nCost at (fixed) debugging parameters (w/ lambda = 10): %f ' ...
+         '\n(this value should be about 0.576051)\n\n'], debug_J);
+
+fprintf('Program paused. Press enter to continue.\n');
+pause;
+
+
+%% =================== Part 8: Training NN ===================
+%  You have now implemented all the code necessary to train a neural 
+%  network. To train your neural network, we will now use "fmincg", which
+%  is a function which works similarly to "fminunc". Recall that these
+%  advanced optimizers are able to train our cost functions efficiently as
+%  long as we provide them with the gradient computations.
+%
+fprintf('\nTraining Neural Network... \n')
+
+%  After you have completed the assignment, change the MaxIter to a larger
+%  value to see how more training helps.
+options = optimset('MaxIter', 50);
+
+%  You should also try different values of lambda
+lambda = 1;
+
+% Create "short hand" for the cost function to be minimized
+costFunction = @(p) nnCostFunction(p, ...
+                                   input_layer_size, ...
+                                   hidden_layer_size, ...
+                                   num_labels, X, y, lambda);
+
+% Now, costFunction is a function that takes in only one argument (the
+% neural network parameters)
+[nn_params, cost] = fmincg(costFunction, initial_nn_params, options);
+
+% Obtain Theta1 and Theta2 back from nn_params
+Theta1 = reshape(nn_params(1:hidden_layer_size * (input_layer_size + 1)), ...
+                 hidden_layer_size, (input_layer_size + 1));
+
+Theta2 = reshape(nn_params((1 + (hidden_layer_size * (input_layer_size + 1))):end), ...
+                 num_labels, (hidden_layer_size + 1));
+
+fprintf('Program paused. Press enter to continue.\n');
+pause;
+
+
+%% ================= Part 9: Visualize Weights =================
+%  You can now "visualize" what the neural network is learning by 
+%  displaying the hidden units to see what features they are capturing in 
+%  the data.
+
+fprintf('\nVisualizing Neural Network... \n')
+
+displayData(Theta1(:, 2:end));
+
+fprintf('\nProgram paused. Press enter to continue.\n');
+pause;
+
+%% ================= Part 10: Implement Predict =================
+%  After training the neural network, we would like to use it to predict
+%  the labels. You will now implement the "predict" function to use the
+%  neural network to predict the labels of the training set. This lets
+%  you compute the training set accuracy.
+
+pred = predict(Theta1, Theta2, X);
+
+fprintf('\nTraining Set Accuracy: %f\n', mean(double(pred == y)) * 100);
+
+
